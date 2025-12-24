@@ -91,6 +91,7 @@ import net.runelite.client.game.SpriteManager;
 import net.runelite.client.game.chatbox.ChatboxItemSearch;
 import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.game.chatbox.ChatboxTextInput;
+import net.runelite.client.input.KeyListener;
 import net.runelite.client.input.KeyManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDependency;
@@ -104,6 +105,7 @@ import net.runelite.client.ui.JagexColors;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
+import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ColorUtil;
 import net.runelite.client.util.HotkeyListener;
 import net.runelite.client.util.ImageUtil;
@@ -119,6 +121,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.util.stream.IntStream;
+import java.awt.event.KeyEvent;
 
 import static inventorysetups.ui.InventorySetupsRunePouchPanel.RUNE_POUCH_AMOUNT_VARBITS;
 import static inventorysetups.ui.InventorySetupsRunePouchPanel.RUNE_POUCH_RUNE_VARBITS;
@@ -242,6 +245,12 @@ public class InventorySetupsPlugin extends Plugin
 	@Inject
 	private KeyManager keyManager;
 
+	@Inject
+	private OverlayManager overlayManager;
+
+	@Inject
+	private InventorySetupsWheelOverlay wheelOverlay;
+
 	@Getter
 	private InventorySetupLayoutUtilities layoutUtilities;
 
@@ -279,6 +288,11 @@ public class InventorySetupsPlugin extends Plugin
 	// Whether hot keys are registered
 	private boolean hotkeysAreRegistered;
 
+	// Whether the setup wheel is currently open
+	private boolean wheelActive;
+
+	private int favoriteCycleIndex = -1;
+
 	private final HotkeyListener returnToSetupsHotkeyListener = new HotkeyListener(() -> config.returnToSetupsHotkey())
 	{
 		@Override
@@ -303,6 +317,80 @@ public class InventorySetupsPlugin extends Plugin
 		public void hotkeyPressed()
 		{
 			panel.toggleSectionMode();
+		}
+	};
+
+	private final KeyListener wheelKeyListener = new KeyListener()
+	{
+		@Override
+		public void keyTyped(KeyEvent e)
+		{
+		}
+
+		@Override
+		public void keyPressed(KeyEvent e)
+		{
+			if (config.wheelHotkey().matches(e))
+			{
+				wheelActive = true;
+				wheelOverlay.setActive(true);
+			}
+		}
+
+		@Override
+		public void keyReleased(KeyEvent e)
+		{
+			if (!wheelActive)
+			{
+				return;
+			}
+
+			if (config.wheelHotkey().matches(e))
+			{
+				InventorySetup selection = wheelOverlay.getSelectedSetup();
+				wheelActive = false;
+				wheelOverlay.setActive(false);
+				if (selection != null)
+				{
+					SwingUtilities.invokeLater(() -> panel.setCurrentInventorySetup(selection, true));
+				}
+			}
+		}
+	};
+
+	private final HotkeyListener setupHotkey1Listener = new HotkeyListener(() -> config.setupHotkey1())
+	{
+		@Override
+		public void hotkeyPressed()
+		{
+			activateSetupByName(config.setupHotkey1Name());
+		}
+	};
+
+	private final HotkeyListener setupHotkey2Listener = new HotkeyListener(() -> config.setupHotkey2())
+	{
+		@Override
+		public void hotkeyPressed()
+		{
+			activateSetupByName(config.setupHotkey2Name());
+		}
+	};
+
+	private final HotkeyListener setupHotkey3Listener = new HotkeyListener(() -> config.setupHotkey3())
+	{
+		@Override
+		public void hotkeyPressed()
+		{
+			activateSetupByName(config.setupHotkey3Name());
+		}
+	};
+
+	private final HotkeyListener cycleFavoriteSetupsHotkeyListener = new HotkeyListener(() -> config.cycleFavoriteSetupsHotkey())
+	{
+		@Override
+		public void hotkeyPressed()
+		{
+			cycleFavoriteSetups();
 		}
 	};
 
@@ -339,6 +427,7 @@ public class InventorySetupsPlugin extends Plugin
 		this.shouldTriggerInventoryHighlightOnGameTick = false;
 		this.chatBoxInputIsOpen = false;
 		this.hotkeysAreRegistered = false;
+		this.wheelActive = false;
 		this.cache = new InventorySetupsCache();
 		this.inventorySetups = new ArrayList<>();
 		this.sections = new ArrayList<>();
@@ -368,6 +457,7 @@ public class InventorySetupsPlugin extends Plugin
 			return true;
 		});
 
+		overlayManager.add(wheelOverlay);
 	}
 
 	@Override
@@ -375,6 +465,7 @@ public class InventorySetupsPlugin extends Plugin
 	{
 		resetBankSearch();
 		clientToolbar.removeNavigation(navButton);
+		overlayManager.remove(wheelOverlay);
 	}
 
 	public String getSavedVersionString()
@@ -434,6 +525,11 @@ public class InventorySetupsPlugin extends Plugin
 			keyManager.registerKeyListener(returnToSetupsHotkeyListener);
 			keyManager.registerKeyListener(filterBankHotkeyListener);
 			keyManager.registerKeyListener(sectionModeHotkeyListener);
+			keyManager.registerKeyListener(wheelKeyListener);
+			keyManager.registerKeyListener(setupHotkey1Listener);
+			keyManager.registerKeyListener(setupHotkey2Listener);
+			keyManager.registerKeyListener(setupHotkey3Listener);
+			keyManager.registerKeyListener(cycleFavoriteSetupsHotkeyListener);
 			this.hotkeysAreRegistered = true;
 		}
 	}
@@ -445,6 +541,13 @@ public class InventorySetupsPlugin extends Plugin
 			keyManager.unregisterKeyListener(returnToSetupsHotkeyListener);
 			keyManager.unregisterKeyListener(filterBankHotkeyListener);
 			keyManager.unregisterKeyListener(sectionModeHotkeyListener);
+			keyManager.unregisterKeyListener(wheelKeyListener);
+			keyManager.unregisterKeyListener(setupHotkey1Listener);
+			keyManager.unregisterKeyListener(setupHotkey2Listener);
+			keyManager.unregisterKeyListener(setupHotkey3Listener);
+			keyManager.unregisterKeyListener(cycleFavoriteSetupsHotkeyListener);
+			wheelActive = false;
+			wheelOverlay.setActive(false);
 			this.hotkeysAreRegistered = false;
 		}
 	}
@@ -2323,6 +2426,22 @@ public class InventorySetupsPlugin extends Plugin
 		return client.getGameState() == GameState.LOGGED_IN;
 	}
 
+	public List<InventorySetup> getWheelSetups()
+	{
+		if (inventorySetups == null || inventorySetups.isEmpty())
+		{
+			return new ArrayList<>();
+		}
+
+		List<InventorySetup> favorites = inventorySetups.stream()
+			.filter(InventorySetup::isFavorite)
+			.collect(Collectors.toList());
+
+		List<InventorySetup> source = favorites.isEmpty() ? inventorySetups : favorites;
+		int size = Math.min(source.size(), InventorySetupsWheelOverlay.MAX_SETUPS);
+		return new ArrayList<>(source.subList(0, size));
+	}
+
 	public boolean isFilteringAllowed()
 	{
 		return navButtonIsSelected || !config.requireActivePanelFilter();
@@ -2495,6 +2614,73 @@ public class InventorySetupsPlugin extends Plugin
 		cache.updateSectionName(section, newName);
 		section.setName(newName);
 		// config will already be updated by caller so no need to update it here
+	}
+
+	private void activateSetupByName(final String setupName)
+	{
+		InventorySetup setup = findSetupByName(setupName);
+		if (setup == null || panel == null)
+		{
+			return;
+		}
+
+		SwingUtilities.invokeLater(() -> panel.setCurrentInventorySetup(setup, true));
+	}
+
+	private InventorySetup findSetupByName(final String setupName)
+	{
+		if (setupName == null)
+		{
+			return null;
+		}
+
+		String trimmed = setupName.trim();
+		if (trimmed.isEmpty() || cache == null)
+		{
+			return null;
+		}
+
+		InventorySetup exact = cache.getInventorySetupNames().get(trimmed);
+		if (exact != null)
+		{
+			return exact;
+		}
+
+		for (Map.Entry<String, InventorySetup> entry : cache.getInventorySetupNames().entrySet())
+		{
+			if (entry.getKey().equalsIgnoreCase(trimmed))
+			{
+				return entry.getValue();
+			}
+		}
+
+		return null;
+	}
+
+	private void cycleFavoriteSetups()
+	{
+		if (inventorySetups == null || inventorySetups.isEmpty() || panel == null)
+		{
+			return;
+		}
+
+		List<InventorySetup> favorites = inventorySetups.stream()
+			.filter(InventorySetup::isFavorite)
+			.collect(Collectors.toList());
+
+		if (favorites.isEmpty())
+		{
+			return;
+		}
+
+		InventorySetup current = panel.getCurrentSelectedSetup();
+		int currentIndex = current == null ? -1 : favorites.indexOf(current);
+		int indexBase = currentIndex >= 0 ? currentIndex : favoriteCycleIndex;
+		int nextIndex = (indexBase + 1) % favorites.size();
+		favoriteCycleIndex = nextIndex;
+
+		InventorySetup nextSetup = favorites.get(nextIndex);
+		SwingUtilities.invokeLater(() -> panel.setCurrentInventorySetup(nextSetup, true));
 	}
 
 }

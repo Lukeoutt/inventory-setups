@@ -281,6 +281,102 @@ public interface InventorySetupsConfig extends Config
 	}
 
 	@ConfigItem(
+			keyName = "wheelHotkey",
+			name = "Setup Wheel Hotkey",
+			description = "Hold to open the setup wheel",
+			section = hotkeySection,
+			position = 2
+	)
+	default Keybind wheelHotkey()
+	{
+		return Keybind.NOT_SET;
+	}
+
+	@ConfigItem(
+			keyName = "setupHotkey1",
+			name = "Setup Hotkey 1",
+			description = "Activates a specific setup by name",
+			section = hotkeySection,
+			position = 3
+	)
+	default Keybind setupHotkey1()
+	{
+		return Keybind.NOT_SET;
+	}
+
+	@ConfigItem(
+			keyName = "setupHotkey1Name",
+			name = "Setup Hotkey 1 Name",
+			description = "Name of the setup to activate with Setup Hotkey 1",
+			section = hotkeySection,
+			position = 4
+	)
+	default String setupHotkey1Name()
+	{
+		return "";
+	}
+
+	@ConfigItem(
+			keyName = "setupHotkey2",
+			name = "Setup Hotkey 2",
+			description = "Activates a specific setup by name",
+			section = hotkeySection,
+			position = 5
+	)
+	default Keybind setupHotkey2()
+	{
+		return Keybind.NOT_SET;
+	}
+
+	@ConfigItem(
+			keyName = "setupHotkey2Name",
+			name = "Setup Hotkey 2 Name",
+			description = "Name of the setup to activate with Setup Hotkey 2",
+			section = hotkeySection,
+			position = 6
+	)
+	default String setupHotkey2Name()
+	{
+		return "";
+	}
+
+	@ConfigItem(
+			keyName = "setupHotkey3",
+			name = "Setup Hotkey 3",
+			description = "Activates a specific setup by name",
+			section = hotkeySection,
+			position = 7
+	)
+	default Keybind setupHotkey3()
+	{
+		return Keybind.NOT_SET;
+	}
+
+	@ConfigItem(
+			keyName = "setupHotkey3Name",
+			name = "Setup Hotkey 3 Name",
+			description = "Name of the setup to activate with Setup Hotkey 3",
+			section = hotkeySection,
+			position = 8
+	)
+	default String setupHotkey3Name()
+	{
+		return "";
+	}
+
+	@ConfigItem(
+			keyName = "cycleFavoriteSetupsHotkey",
+			name = "Cycle Favorite Setups",
+			description = "Cycles through favorite setups in order",
+			section = hotkeySection,
+			position = 9
+	)
+	default Keybind cycleFavoriteSetupsHotkey()
+	{
+		return Keybind.NOT_SET;
+	}
+
+	@ConfigItem(
 			keyName = CONFIG_KEY_PERSIST_HOTKEYS,
 			name = "Persist Hotkeys Outside Bank",
 			description = "Configures hotkeys to persist even outside the bank",
