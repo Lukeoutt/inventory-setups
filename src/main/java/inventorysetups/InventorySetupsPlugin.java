@@ -120,6 +120,7 @@ import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.Collections;
 import java.util.stream.IntStream;
 import java.awt.event.KeyEvent;
 
@@ -251,6 +252,7 @@ public class InventorySetupsPlugin extends Plugin
 	@Inject
 	private InventorySetupsWheelOverlay wheelOverlay;
 
+
 	@Getter
 	private InventorySetupLayoutUtilities layoutUtilities;
 
@@ -291,6 +293,20 @@ public class InventorySetupsPlugin extends Plugin
 	// Whether the setup wheel is currently open
 	private boolean wheelActive;
 
+	private WheelMode wheelMode = WheelMode.NONE;
+
+	private InventorySetupCategory selectedWheelCategory;
+	private double selectedWheelAngleRad;
+
+	private InventorySetupCategory hoveredWheelCategory;
+	private long wheelHoverStartMs;
+	private boolean hoveringSubRing;
+	private long subRingHoverLostAtMs;
+	private static final long SUB_RING_LINGER_MS = 200L;
+
+	private static final long WHEEL_HOVER_DELAY_MS = 250L;
+
+
 	private int favoriteCycleIndex = -1;
 
 	private final HotkeyListener returnToSetupsHotkeyListener = new HotkeyListener(() -> config.returnToSetupsHotkey())
@@ -330,9 +346,19 @@ public class InventorySetupsPlugin extends Plugin
 		@Override
 		public void keyPressed(KeyEvent e)
 		{
+			if (!config.enableWheel())
+			{
+				return;
+			}
+
 			if (config.wheelHotkey().matches(e))
 			{
 				wheelActive = true;
+				if (wheelMode == WheelMode.NONE)
+				{
+					selectedWheelCategory = null;
+					wheelMode = WheelMode.CATEGORY;
+				}
 				wheelOverlay.setActive(true);
 			}
 		}
@@ -347,13 +373,22 @@ public class InventorySetupsPlugin extends Plugin
 
 			if (config.wheelHotkey().matches(e))
 			{
-				InventorySetup selection = wheelOverlay.getSelectedSetup();
-				wheelActive = false;
-				wheelOverlay.setActive(false);
-				if (selection != null)
+				if (selectedWheelCategory != null)
 				{
-					SwingUtilities.invokeLater(() -> panel.setCurrentInventorySetup(selection, true));
+					InventorySetup selection = wheelOverlay.getSelectedSetup();
+					if (selection != null)
+					{
+						SwingUtilities.invokeLater(() -> panel.setCurrentInventorySetup(selection, true));
+					}
 				}
+
+				wheelActive = false;
+				wheelMode = WheelMode.NONE;
+				selectedWheelCategory = null;
+				selectedWheelAngleRad = 0.0;
+				hoveredWheelCategory = null;
+				wheelHoverStartMs = 0L;
+				wheelOverlay.setActive(false);
 			}
 		}
 	};
@@ -547,6 +582,8 @@ public class InventorySetupsPlugin extends Plugin
 			keyManager.unregisterKeyListener(setupHotkey3Listener);
 			keyManager.unregisterKeyListener(cycleFavoriteSetupsHotkeyListener);
 			wheelActive = false;
+			wheelMode = WheelMode.NONE;
+			selectedWheelCategory = null;
 			wheelOverlay.setActive(false);
 			this.hotkeysAreRegistered = false;
 		}
@@ -607,6 +644,7 @@ public class InventorySetupsPlugin extends Plugin
 			}
 		}
 	}
+
 
 	@Subscribe
 	public void onGameTick(GameTick gameTick)
@@ -2424,6 +2462,259 @@ public class InventorySetupsPlugin extends Plugin
 	public boolean isHighlightingAllowed()
 	{
 		return client.getGameState() == GameState.LOGGED_IN;
+	}
+
+	public boolean isWheelActive()
+	{
+		return wheelActive;
+	}
+
+	public WheelMode getWheelMode()
+	{
+		return wheelMode;
+	}
+
+	public InventorySetupCategory getWheelSelectedCategory()
+	{
+		return selectedWheelCategory;
+	}
+
+	public double getWheelSelectedAngleRad()
+	{
+		return selectedWheelAngleRad;
+	}
+
+	public boolean isWheelSubRingActive()
+	{
+		return selectedWheelCategory != null;
+	}
+
+	public void updateWheelHoverCategory(int categoryIndex, double angleRad)
+	{
+		if (wheelMode != WheelMode.CATEGORY)
+		{
+			return;
+		}
+
+		List<InventorySetupCategory> categories = getWheelCategories();
+		InventorySetupCategory category = (categoryIndex >= 0 && categoryIndex < categories.size())
+			? categories.get(categoryIndex)
+			: null;
+
+		if (category == null)
+		{
+			hoveredWheelCategory = null;
+			wheelHoverStartMs = 0L;
+			if (selectedWheelCategory != null && !hoveringSubRing)
+			{
+				long sinceLost = System.currentTimeMillis() - subRingHoverLostAtMs;
+				if (sinceLost >= SUB_RING_LINGER_MS)
+				{
+					selectedWheelCategory = null;
+					selectedWheelAngleRad = 0.0;
+				}
+			}
+			return;
+		}
+
+		if (hoveredWheelCategory == null || !hoveredWheelCategory.getId().equals(category.getId()))
+		{
+			hoveredWheelCategory = category;
+			wheelHoverStartMs = System.currentTimeMillis();
+			if (selectedWheelCategory != null && !selectedWheelCategory.getId().equals(category.getId()))
+			{
+				selectedWheelCategory = null;
+				selectedWheelAngleRad = 0.0;
+			}
+			return;
+		}
+
+		if (selectedWheelCategory == null && System.currentTimeMillis() - wheelHoverStartMs >= WHEEL_HOVER_DELAY_MS)
+		{
+			selectedWheelCategory = hoveredWheelCategory;
+			selectedWheelAngleRad = angleRad;
+		}
+	}
+
+	public void setHoveringSubRing(boolean hovering)
+	{
+		this.hoveringSubRing = hovering;
+		if (!hovering)
+		{
+			subRingHoverLostAtMs = System.currentTimeMillis();
+		}
+
+		if (!hovering && hoveredWheelCategory == null)
+		{
+			long sinceLost = System.currentTimeMillis() - subRingHoverLostAtMs;
+			if (sinceLost >= SUB_RING_LINGER_MS)
+			{
+				selectedWheelCategory = null;
+				selectedWheelAngleRad = 0.0;
+			}
+		}
+	}
+
+	public List<InventorySetupCategory> getWheelCategories()
+	{
+		List<InventorySetupCategory> categories = new ArrayList<>();
+		if (sections != null)
+		{
+			for (InventorySetupsSection section : sections)
+			{
+				if (section == null)
+				{
+					continue;
+				}
+
+				List<String> favoritesInSection = getFavoriteSetupNamesForSection(section);
+				if (!favoritesInSection.isEmpty())
+				{
+					categories.add(new InventorySetupCategory(section.getName(), section.getName(), favoritesInSection));
+				}
+			}
+		}
+
+		List<String> unassignedFavorites = getFavoriteUnassignedSetupNames();
+		if (!unassignedFavorites.isEmpty())
+		{
+			categories.add(new InventorySetupCategory("Unassigned", "Unassigned", unassignedFavorites));
+		}
+
+		if (categories.isEmpty())
+		{
+			return categories;
+		}
+
+		int size = Math.min(categories.size(), InventorySetupsWheelOverlay.MAX_SETUPS);
+		return new ArrayList<>(categories.subList(0, size));
+	}
+
+	public List<InventorySetup> getWheelSetupsForCategory(InventorySetupCategory category)
+	{
+		if (category == null)
+		{
+			return getDefaultWheelSetups();
+		}
+
+		if (category.getSetupNames() == null)
+		{
+			return new ArrayList<>();
+		}
+
+		List<InventorySetup> setups = new ArrayList<>();
+		for (String name : category.getSetupNames())
+		{
+			InventorySetup setup = findSetupByName(name);
+			if (setup != null && setup.isFavorite())
+			{
+				setups.add(setup);
+			}
+		}
+
+		if (setups.isEmpty())
+		{
+			return setups;
+		}
+
+		int size = Math.min(setups.size(), InventorySetupsWheelOverlay.MAX_SETUPS);
+		return new ArrayList<>(setups.subList(0, size));
+	}
+
+	public List<String> getWheelLabelsForMode(WheelMode mode)
+	{
+		if (mode == WheelMode.CATEGORY)
+		{
+			List<String> labels = new ArrayList<>();
+			for (InventorySetupCategory category : getWheelCategories())
+			{
+				labels.add(category.getName());
+			}
+			return labels;
+		}
+
+		if (mode == WheelMode.SETUP)
+		{
+			List<String> labels = new ArrayList<>();
+			for (InventorySetup setup : getWheelSetupsForCategory(selectedWheelCategory))
+			{
+				labels.add(setup.getName());
+			}
+			return labels;
+		}
+
+		return Collections.emptyList();
+	}
+
+	private boolean hasWheelCategories()
+	{
+		return !getWheelCategories().isEmpty();
+	}
+
+	private List<InventorySetup> getDefaultWheelSetups()
+	{
+		if (inventorySetups == null || inventorySetups.isEmpty())
+		{
+			return new ArrayList<>();
+		}
+
+		List<InventorySetup> favorites = inventorySetups.stream()
+			.filter(InventorySetup::isFavorite)
+			.collect(Collectors.toList());
+
+		List<InventorySetup> source = favorites.isEmpty() ? inventorySetups : favorites;
+		int size = Math.min(source.size(), InventorySetupsWheelOverlay.MAX_SETUPS);
+		return new ArrayList<>(source.subList(0, size));
+	}
+
+	private List<String> getFavoriteSetupNamesForSection(InventorySetupsSection section)
+	{
+		if (section == null || cache == null)
+		{
+			return new ArrayList<>();
+		}
+
+		Map<String, InventorySetup> setupsInSection = cache.getSectionSetupsMap().get(section.getName());
+		if (setupsInSection == null || setupsInSection.isEmpty())
+		{
+			return new ArrayList<>();
+		}
+
+		List<String> favorites = new ArrayList<>();
+		for (InventorySetup setup : setupsInSection.values())
+		{
+			if (setup != null && setup.isFavorite())
+			{
+				favorites.add(setup.getName());
+			}
+		}
+
+		return favorites;
+	}
+
+	private List<String> getFavoriteUnassignedSetupNames()
+	{
+		if (cache == null || inventorySetups == null)
+		{
+			return new ArrayList<>();
+		}
+
+		List<String> unassignedFavorites = new ArrayList<>();
+		for (InventorySetup setup : inventorySetups)
+		{
+			if (setup == null || !setup.isFavorite())
+			{
+				continue;
+			}
+
+			Map<String, InventorySetupsSection> sectionsForSetup = cache.getSetupSectionsMap().get(setup.getName());
+			if (sectionsForSetup == null || sectionsForSetup.isEmpty())
+			{
+				unassignedFavorites.add(setup.getName());
+			}
+		}
+
+		return unassignedFavorites;
 	}
 
 	public List<InventorySetup> getWheelSetups()

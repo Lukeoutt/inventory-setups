@@ -19,12 +19,26 @@ public class InventorySetupsWheelOverlay extends Overlay
 	private static final Color SLICE_COLOR = new Color(20, 20, 20, 180);
 	private static final Color SLICE_HIGHLIGHT = new Color(0, 160, 110, 210);
 	private static final Color TEXT_COLOR = new Color(240, 240, 240, 220);
+	private static final double CATEGORY_INNER_RADIUS_RATIO = 0.25;
+	private static final double CATEGORY_OUTER_RADIUS_RATIO = 0.85;
+	private static final double SETUP_INNER_RADIUS_RATIO = 0.2;
+	private static final double SETUP_OUTER_RADIUS_RATIO = 0.65;
+	private static final double START_ANGLE_RAD = -Math.PI / 2.0;
+	private static final double SUB_RING_OFFSET_RATIO = 1.35;
 
 	private final Client client;
 	private final InventorySetupsPlugin plugin;
 
-	private boolean active;
 	private int selectedIndex = -1;
+	private java.awt.Point lastCenter;
+	private double lastCategoryInnerRadius;
+	private double lastCategoryOuterRadius;
+	private double lastSetupInnerRadius;
+	private double lastSetupOuterRadius;
+	private java.awt.Point lastSetupCenter;
+	private int lastCategoryCount;
+	private int lastSetupCount;
+	private double lastStartAngleRad;
 
 	@Inject
 	public InventorySetupsWheelOverlay(Client client, InventorySetupsPlugin plugin)
@@ -38,33 +52,73 @@ public class InventorySetupsWheelOverlay extends Overlay
 
 	public void setActive(boolean active)
 	{
-		this.active = active;
 		if (!active)
 		{
 			selectedIndex = -1;
+			lastCategoryCount = 0;
+			lastSetupCount = 0;
 		}
+	}
+
+	public InventorySetupCategory getSelectedCategory()
+	{
+		List<InventorySetupCategory> categories = plugin.getWheelCategories();
+		int index = getSliceIndexFromMouse(
+			client.getMouseCanvasPosition(),
+			lastCenter,
+			lastCategoryInnerRadius,
+			lastCategoryOuterRadius,
+			categories.size(),
+			lastStartAngleRad
+		);
+		if (index < 0 || index >= categories.size())
+		{
+			return null;
+		}
+		return categories.get(index);
 	}
 
 	public InventorySetup getSelectedSetup()
 	{
-		List<InventorySetup> setups = plugin.getWheelSetups();
-		if (selectedIndex < 0 || selectedIndex >= setups.size())
+		InventorySetupCategory category = plugin.getWheelSelectedCategory();
+		if (category == null)
+		{
+			category = null;
+		}
+
+		List<InventorySetup> setups = plugin.getWheelSetupsForCategory(category);
+		int index = getSliceIndexFromMouse(
+			client.getMouseCanvasPosition(),
+			lastSetupCenter,
+			lastSetupInnerRadius,
+			lastSetupOuterRadius,
+			setups.size(),
+			lastStartAngleRad
+		);
+		if (index < 0 || index >= setups.size())
 		{
 			return null;
 		}
-		return setups.get(selectedIndex);
+
+		return setups.get(index);
 	}
 
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!active)
+		if (!plugin.isWheelActive())
 		{
 			return null;
 		}
 
-		List<InventorySetup> setups = plugin.getWheelSetups();
-		if (setups.isEmpty())
+		WheelMode mode = plugin.getWheelMode();
+		if (mode == WheelMode.NONE)
+		{
+			return null;
+		}
+
+		List<String> labels = plugin.getWheelLabelsForMode(WheelMode.CATEGORY);
+		if (labels.isEmpty())
 		{
 			return null;
 		}
@@ -77,20 +131,24 @@ public class InventorySetupsWheelOverlay extends Overlay
 		int centerX = canvasWidth / 2;
 		int centerY = canvasHeight / 2;
 
+		double categoryInnerRadius = radius * CATEGORY_INNER_RADIUS_RATIO;
+		double categoryOuterRadius = radius * CATEGORY_OUTER_RADIUS_RATIO;
+		double setupInnerRadius = radius * SETUP_INNER_RADIUS_RATIO;
+		double setupOuterRadius = radius * SETUP_OUTER_RADIUS_RATIO;
+
+		lastCenter = new java.awt.Point(centerX, centerY);
+		lastCategoryInnerRadius = categoryInnerRadius;
+		lastCategoryOuterRadius = categoryOuterRadius;
+		lastSetupInnerRadius = setupInnerRadius;
+		lastSetupOuterRadius = setupOuterRadius;
+		lastCategoryCount = labels.size();
+		lastStartAngleRad = START_ANGLE_RAD;
+
 		Point mouse = client.getMouseCanvasPosition();
-		int mouseX = mouse.getX();
-		int mouseY = mouse.getY();
-
-		double dx = mouseX - centerX;
-		double dy = centerY - mouseY;
-		double angle = Math.atan2(dy, dx);
-		if (angle < 0)
-		{
-			angle += Math.PI * 2;
-		}
-
-		double sliceAngle = (Math.PI * 2) / setups.size();
-		selectedIndex = (int) Math.floor((angle + sliceAngle / 2) / sliceAngle) % setups.size();
+		selectedIndex = getSliceIndexFromMouse(mouse, lastCenter, lastCategoryInnerRadius, lastCategoryOuterRadius, lastCategoryCount, lastStartAngleRad);
+		double hoveredAngle = getSliceCenterAngle(selectedIndex, lastCategoryCount, lastStartAngleRad);
+		boolean hoveringSubRing = false;
+		plugin.updateWheelHoverCategory(selectedIndex, hoveredAngle);
 
 		int x = centerX - radius;
 		int y = centerY - radius;
@@ -100,16 +158,17 @@ public class InventorySetupsWheelOverlay extends Overlay
 
 		FontMetrics metrics = graphics.getFontMetrics();
 
-		for (int i = 0; i < setups.size(); i++)
+		double sliceAngle = (Math.PI * 2) / labels.size();
+
+		for (int i = 0; i < labels.size(); i++)
 		{
-			double start = i * sliceAngle;
+			double start = lastStartAngleRad + i * sliceAngle;
 			int startDeg = (int) Math.toDegrees(start);
 			int arcDeg = (int) Math.toDegrees(sliceAngle);
 			graphics.setColor(i == selectedIndex ? SLICE_HIGHLIGHT : SLICE_COLOR);
 			graphics.fillArc(x, y, diameter, diameter, startDeg, arcDeg);
 
-			InventorySetup setup = setups.get(i);
-			String label = setup.getName();
+			String label = labels.get(i);
 			double labelAngle = start + sliceAngle / 2;
 			int labelX = (int) (centerX + Math.cos(labelAngle) * radius * 0.6);
 			int labelY = (int) (centerY - Math.sin(labelAngle) * radius * 0.6);
@@ -119,6 +178,93 @@ public class InventorySetupsWheelOverlay extends Overlay
 			graphics.drawString(label, labelX - textWidth / 2, labelY + textHeight / 2);
 		}
 
+		if (plugin.isWheelSubRingActive())
+		{
+			List<InventorySetup> setups = plugin.getWheelSetupsForCategory(plugin.getWheelSelectedCategory());
+			lastSetupCount = setups.size();
+			if (!setups.isEmpty())
+			{
+				double setupSliceAngle = (Math.PI * 2) / setups.size();
+				double offsetAngle = plugin.getWheelSelectedAngleRad();
+				double offsetDistance = radius * SUB_RING_OFFSET_RATIO;
+				int setupCenterX = (int) Math.round(centerX + Math.cos(offsetAngle) * offsetDistance);
+				int setupCenterY = (int) Math.round(centerY - Math.sin(offsetAngle) * offsetDistance);
+
+				java.awt.Point setupCenter = new java.awt.Point(setupCenterX, setupCenterY);
+				lastSetupCenter = setupCenter;
+				int setupDiameter = (int) Math.round(setupOuterRadius * 2);
+				int setupX = setupCenterX - (int) Math.round(setupOuterRadius);
+				int setupY = setupCenterY - (int) Math.round(setupOuterRadius);
+
+				int setupIndex = getSliceIndexFromMouse(mouse, setupCenter, lastSetupInnerRadius, lastSetupOuterRadius, setups.size(), lastStartAngleRad);
+				hoveringSubRing = setupIndex >= 0;
+
+				for (int i = 0; i < setups.size(); i++)
+				{
+					double start = lastStartAngleRad + i * setupSliceAngle;
+					int startDeg = (int) Math.toDegrees(start);
+					int arcDeg = (int) Math.toDegrees(setupSliceAngle);
+					graphics.setColor(i == setupIndex ? SLICE_HIGHLIGHT : SLICE_COLOR);
+					graphics.fillArc(setupX, setupY, setupDiameter, setupDiameter, startDeg, arcDeg);
+
+					String label = setups.get(i).getName();
+					double labelAngle = start + setupSliceAngle / 2;
+					double midRadius = (setupInnerRadius + setupOuterRadius) / 2;
+					int labelX = (int) (setupCenterX + Math.cos(labelAngle) * midRadius);
+					int labelY = (int) (setupCenterY - Math.sin(labelAngle) * midRadius);
+					int textWidth = metrics.stringWidth(label);
+					int textHeight = metrics.getAscent();
+					graphics.setColor(TEXT_COLOR);
+					graphics.drawString(label, labelX - textWidth / 2, labelY + textHeight / 2);
+				}
+			}
+		}
+
+		plugin.setHoveringSubRing(hoveringSubRing);
+
 		return null;
+	}
+
+	private int getSliceIndexFromMouse(Point mouse, java.awt.Point center, double innerRadius, double outerRadius,
+		int sliceCount, double startAngleRad)
+	{
+		if (mouse == null || center == null || sliceCount <= 0)
+		{
+			return -1;
+		}
+
+		double dx = mouse.getX() - center.getX();
+		double dy = center.getY() - mouse.getY();
+		double distance = Math.sqrt(dx * dx + dy * dy);
+		if (distance < innerRadius || distance > outerRadius)
+		{
+			return -1;
+		}
+
+		double angle = Math.atan2(dy, dx);
+		double twoPi = Math.PI * 2.0;
+		double sliceAngle = twoPi / sliceCount;
+
+		double normalized = angle - startAngleRad;
+		normalized = (normalized % twoPi + twoPi) % twoPi;
+
+		int index = (int) Math.floor(normalized / sliceAngle);
+		if (index < 0 || index >= sliceCount)
+		{
+			return -1;
+		}
+
+		return index;
+	}
+
+	private double getSliceCenterAngle(int index, int sliceCount, double startAngleRad)
+	{
+		if (index < 0 || sliceCount <= 0)
+		{
+			return startAngleRad;
+		}
+
+		double sliceAngle = (Math.PI * 2.0) / sliceCount;
+		return startAngleRad + (index + 0.5) * sliceAngle;
 	}
 }

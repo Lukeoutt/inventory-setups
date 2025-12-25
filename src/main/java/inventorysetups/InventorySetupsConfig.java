@@ -281,6 +281,18 @@ public interface InventorySetupsConfig extends Config
 	}
 
 	@ConfigItem(
+			keyName = "enableWheel",
+			name = "Enable Setup Wheel",
+			description = "Enable the radial setup wheel selector",
+			section = hotkeySection,
+			position = 1
+	)
+	default boolean enableWheel()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 			keyName = "wheelHotkey",
 			name = "Setup Wheel Hotkey",
 			description = "Hold to open the setup wheel",
